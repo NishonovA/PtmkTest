@@ -51,15 +51,21 @@ namespace PtmkTest
         static void CreateTable(SqlConnection connection)
         {
             SqlCommand command = new SqlCommand(
-                "IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Employees') " +
+                "IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Employees') " +
                 "CREATE TABLE Employees (" +
                 "Id INT IDENTITY(1,1) PRIMARY KEY, " +
                 "FullName NVARCHAR(50) NOT NULL, " +
                 "BirthDate DATE NOT NULL, " +
-                "Gender NVARCHAR(10) NOT NULL)",
+                "Gender NVARCHAR(10) NOT NULL); " +
+                "IF NOT EXISTS (SELECT 1 FROM sys.table_types WHERE name = 'EmployeeType')" +
+                "CREATE TYPE EmployeeType AS TABLE (" +
+                "FullName NVARCHAR(50), " +
+                "BirthDate DATE, " +
+                "Gender NVARCHAR(50) );",
                 connection);
 
             command.ExecuteNonQuery();
+
             Console.WriteLine("Таблица Employees создана успешно");
         }
 
@@ -72,6 +78,7 @@ namespace PtmkTest
             Employee employee = new Employee(fullName, birthDate, gender);
 
             employee.SaveToDatabase(connection);
+
             Console.WriteLine($"Сотрудник {employee.FullName} сохранен в БД. Возраст: {employee.CalculateAge()} лет");
         }
 
@@ -87,6 +94,7 @@ namespace PtmkTest
             using (SqlDataReader reader = command.ExecuteReader())
             {
                 Console.WriteLine("Список сотрудников:");
+
                 Console.WriteLine("{0,-30} {1,-12} {2,-8} {3}", "ФИО", "Дата рожд.", "Пол", "Возраст");
 
                 while (reader.Read())
@@ -106,20 +114,16 @@ namespace PtmkTest
         {
             Console.WriteLine("Начало генерации 1000000 случайных сотрудников...");
 
-            //List<Employee> employees = new List<Employee>();
-
-            DataTable table = new DataTable();
-            table.Columns.Add("FullName", typeof(string));
-            table.Columns.Add("BirthDate", typeof(DateTime));
-            table.Columns.Add("Gender", typeof(string));
+            DataTable employees = new DataTable();
+            employees.Columns.Add("FullName", typeof(string));
+            employees.Columns.Add("BirthDate", typeof(DateTime));
+            employees.Columns.Add("Gender", typeof(string));
 
             for (int i = 0; i < 1000000; i++)
             {
                 Employee employee = GenerateRandomEmployee(isMaleF: false);
 
-                //employee.SaveToDatabase(connection);
-                //employees.Add(employee);
-                table.Rows.Add(employee.FullName, employee.BirthDate, employee.Gender);
+                employees.Rows.Add(employee.FullName, employee.BirthDate, employee.Gender);
             }
 
             Console.WriteLine("Дополнительная генерация 100 мужчин на F...");
@@ -128,20 +132,18 @@ namespace PtmkTest
             {
                 Employee employee = GenerateRandomEmployee(isMaleF: true);
 
-                //employee.SaveToDatabase(connection);
-                //employees.Add(employee);
-                table.Rows.Add(employee.FullName, employee.BirthDate, employee.Gender);
+                employees.Rows.Add(employee.FullName, employee.BirthDate, employee.Gender);
             }
 
             using (SqlCommand command = new SqlCommand(
                 "INSERT INTO Employees (FullName, BirthDate , Gender) " +
-                "SELECT FullName, BirthDate, Gender FROM @table",
+                "SELECT FullName, BirthDate, Gender FROM @employees",
                 connection))
             {
 
-                SqlParameter parameter = command.Parameters.AddWithValue("@table", table);
+                SqlParameter parameter = command.Parameters.AddWithValue("@employees", employees);
                 parameter.SqlDbType = SqlDbType.Structured;
-                parameter.TypeName = "dbo.Employee";
+                parameter.TypeName = "EmployeeType";
 
                 command.ExecuteNonQuery();
             }
@@ -187,12 +189,14 @@ namespace PtmkTest
         {
             Console.WriteLine("Выполнение выборки: Male с фамилией на F...");
 
+            OptimizeDataBase(connection);
+
             var stopwatch = Stopwatch.StartNew();
 
             var command = new SqlCommand(
                 "SELECT FullName, BirthDate, Gender " +
                 "FROM Employees " +
-                "WHERE Gender = 'Male' AND FullName LIKE 'F%'",
+                "WHERE FullName LIKE 'F%' AND Gender = 'Male'",
                 connection);
 
             int count = 0;
@@ -208,6 +212,18 @@ namespace PtmkTest
 
             stopwatch.Stop();
             Console.WriteLine($"Найдено {count} записей. Время выполнения: {stopwatch.ElapsedMilliseconds} мс");
+        }
+
+        static void OptimizeDataBase(SqlConnection connection)
+        {
+            SqlCommand command = new SqlCommand(
+                "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_FullName' AND object_id = OBJECT_ID('Employees')) " +
+                "CREATE INDEX idx_FullName ON Employees(FullName, Gender)",
+                connection);
+
+            command.ExecuteNonQuery();
+
+            Console.WriteLine("База данных была оптимизирована с помощью индексации ФИО и Пола.");
         }
     }
 }
